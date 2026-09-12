@@ -344,13 +344,26 @@ function applyCustomerState(payload: any) {
       project,
     ),
   );
+  const missingOrLocal = current.projects.filter(p => !incoming.some((item: Project) => item.id === p.id))
+    .map((p) =>
+      p.owner === payload.userId && p.engineProjectId
+        ? {
+            ...p,
+            status: 'نیازمند اصلاح' as Status,
+            progress: 0,
+            outputReady: false,
+            lastError:
+              'ارتباط این پروژه با موتور تولید پیدا نشد؛ پروژه را دوباره ثبت کنید.',
+          }
+        : p,
+    );
   writeStore({ ...current,
     users: current.users.some(u => u.id === payload.userId)
       ? current.users.map(u => u.id === payload.userId ? { ...u, wallet: payload.balance } : u)
       : [...current.users, { id: payload.userId, wallet: payload.balance, name: '', mobile: localStorage.getItem('engi-auth-phone') || '', email: '', active: true, admin: false }],
     // Preserve projects that have not reached the server yet. The import path
     // runs before state refresh and replaces them with the durable copies.
-    projects: [...reconciled, ...current.projects.filter(p => !incoming.some((x: Project) => x.id === p.id))],
+    projects: [...reconciled, ...missingOrLocal],
     tx: [...(payload.transactions || []), ...current.tx.filter(t => t.owner !== payload.userId)],
   });
   window.dispatchEvent(new Event('engi-update'));
@@ -367,13 +380,8 @@ function mergeEngineState(project: Project, state?: EngineProjectState): Project
   const incomingRevision = Number(
     state.state_revision ?? state.current_revision ?? currentRevision,
   );
-  const sameOrOlderRevision = incomingRevision <= currentRevision;
   const outputReady = hasEngineState
-    ? Boolean(
-        state.output_ready ||
-          engineStatus === 'ready' ||
-          (sameOrOlderRevision && project.outputReady),
-      )
+    ? Boolean(state.output_ready || engineStatus === 'ready')
     : Boolean(project.outputReady || project.status === 'تکمیل شده');
   const reportedProgress = progress?.percent ?? state.progress ?? project.progress;
   const boundedProgress = Math.max(0, Math.min(100, reportedProgress));
@@ -384,9 +392,9 @@ function mergeEngineState(project: Project, state?: EngineProjectState): Project
     progress:
       outputReady
         ? 100
-        : sameOrOlderRevision
-          ? Math.max(project.progress, boundedProgress)
-          : boundedProgress,
+        : hasEngineState
+          ? boundedProgress
+          : project.progress,
     status:
       !hasEngineState
         ? project.status
@@ -419,7 +427,7 @@ function reconcileProjectSnapshot(current: Project | undefined, incoming: Projec
   const outputReady = Boolean(current.outputReady || incoming.outputReady);
   return {
     ...incoming,
-    progress: outputReady ? 100 : Math.max(current.progress, incoming.progress),
+    progress: outputReady ? 100 : incoming.progress,
     status: outputReady ? 'تکمیل شده' : incoming.status,
     outputReady,
   };
@@ -3926,12 +3934,31 @@ function ProjectProgressDialog({
         }));
       })
       .catch((reason) => {
-        if (!cancelled)
+        if (!cancelled) {
+          if (
+            reason instanceof DesignProjectRequestError &&
+            reason.payload.status === 'missing'
+          )
+            update((store) => ({
+              ...store,
+              projects: store.projects.map((item) =>
+                item.id === project.id
+                  ? {
+                      ...item,
+                      status: 'نیازمند اصلاح',
+                      progress: 0,
+                      outputReady: false,
+                      lastError: reason.message,
+                    }
+                  : item,
+              ),
+            }));
           setError(
             reason instanceof Error
               ? reason.message
               : 'آخرین وضعیت پروژه دریافت نشد.',
           );
+        }
       })
       .finally(() => {
         if (!cancelled) setBusy(false);

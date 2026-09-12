@@ -40,6 +40,15 @@ export async function POST(request: Request) {
         },
       );
       const payload = await response.text();
+      if (response.status === 404)
+        return Response.json(
+          {
+            status: 'missing',
+            error:
+              'ارتباط این پروژه با موتور تولید پیدا نشد؛ پروژه را دوباره ثبت کنید.',
+          },
+          { status: 404, headers: { 'cache-control': 'no-store' } },
+        );
       return new Response(payload, {
         status: response.status,
         headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },

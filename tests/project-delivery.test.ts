@@ -46,11 +46,22 @@ test('completed output always renders as 100 percent in panel and admin rows', (
   assert.match(ui, /outputReady,/);
 });
 
-test('stale and same-revision snapshots cannot decrease project progress', () => {
+test('older revisions are ignored but current engine progress replaces cached progress', () => {
   assert.match(ui, /function reconcileProjectSnapshot/);
   assert.match(ui, /if \(incomingRevision < currentRevision\) return current/);
-  assert.match(ui, /Math\.max\(current\.progress, incoming\.progress\)/);
+  assert.match(ui, /progress: outputReady \? 100 : incoming\.progress/);
+  assert.doesNotMatch(ui, /Math\.max\(current\.progress, incoming\.progress\)/);
   assert.match(ui, /incomingRevision > currentRevision/);
+});
+
+test('missing engine projects never remain at false processing or cached 100 percent', () => {
+  assert.match(bridge, /response\.status === 404/);
+  assert.match(bridge, /status: 'missing'/);
+  assert.match(ui, /reason\.payload\.status === 'missing'/);
+  assert.match(ui, /ارتباط این پروژه با موتور تولید پیدا نشد/);
+  assert.match(ui, /status: 'نیازمند اصلاح' as Status/);
+  assert.match(ui, /progress: 0/);
+  assert.match(ui, /outputReady: false/);
 });
 
 test('download is available only after the engine marks output ready', () => {
