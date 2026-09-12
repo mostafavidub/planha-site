@@ -1,7 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { customerSession, sameOrigin, bridgeHeaders } from '@/lib/customer-bridge';
-
-const ENGINE = 'https://web-app-production-3d3b.up.railway.app';
+import { ENGINE, customerSession, sameOrigin, bridgeHeaders } from '@/lib/customer-bridge';
 
 type BridgeEnv = { PANEL_BRIDGE_TOKEN?: string };
 

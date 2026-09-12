@@ -1,9 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { ENGINE, bridgeHeaders, sameOrigin } from '@/lib/customer-bridge';
 
-const QUESTIONNAIRE_ENGINE =
-  'https://web-app-production-3d3b.up.railway.app/api/questionnaire/analyze';
-
 type EngineQuestion = {
   key: string;
   question: string;
@@ -55,7 +52,7 @@ export async function POST(request: Request) {
     const engineForm = new FormData();
     engineForm.append('file', file, file.name);
     const engineResponse = await fetch(
-      `${QUESTIONNAIRE_ENGINE}?discipline=${discipline}&occupancy=${encodeURIComponent(occupancy)}`,
+      `${ENGINE}/api/questionnaire/analyze?discipline=${discipline}&occupancy=${encodeURIComponent(occupancy)}`,
       {
         method: 'POST',
         body: engineForm,

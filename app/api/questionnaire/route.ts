@@ -1,4 +1,4 @@
-const ENGINE = 'https://web-app-production-3d3b.up.railway.app';
+import { ENGINE } from '@/lib/customer-bridge';
 
 export async function GET(request: Request) {
   const discipline =

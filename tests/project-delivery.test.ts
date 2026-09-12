@@ -5,6 +5,8 @@ import test from 'node:test';
 const ui = readFileSync(new URL('../components/admin.tsx', import.meta.url), 'utf8');
 const bridge = readFileSync(new URL('../app/api/design-project/route.ts', import.meta.url), 'utf8');
 const output = readFileSync(new URL('../app/api/design-project/output/route.ts', import.meta.url), 'utf8');
+const projectFile = readFileSync(new URL('../app/api/project-file/route.ts', import.meta.url), 'utf8');
+const questionnaire = readFileSync(new URL('../app/api/questionnaire/route.ts', import.meta.url), 'utf8');
 
 test('payment delegates the debit and queue to authoritative server checkout', () => {
   const pay = ui.slice(ui.indexOf("async function pay(method"), ui.indexOf('const manualAreaPanel'));
@@ -65,6 +67,13 @@ test('server bridge keeps service credentials and stored files off the browser',
   assert.match(bridge, /env\.FILES/);
   assert.match(bridge, /x-panel-token/);
   assert.doesNotMatch(ui, /PANEL_BRIDGE_TOKEN|x-panel-token/);
+});
+
+test('all design routes share one environment-specific engine origin', () => {
+  for (const route of [bridge, output, projectFile, questionnaire]) {
+    assert.match(route, /(?:import|,).*ENGINE/);
+    assert.doesNotMatch(route, /web-app-production-3d3b\.up\.railway\.app/);
+  }
 });
 
 test('failed projects refresh on dialog open and always render a visible reason', () => {
