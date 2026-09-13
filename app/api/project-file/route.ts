@@ -9,7 +9,7 @@ type EngineQuestion = {
 };
 
 type EngineQuestionnaire = {
-  version: string;
+  identity: string;
   source: string;
   questions: EngineQuestion[];
   conditional_questions?: EngineQuestion[];
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       );
     }
     const engine = (await engineResponse.json()) as EngineQuestionnaire;
-    if (!Array.isArray(engine.questions) || !engine.version) {
+    if (!Array.isArray(engine.questions) || !engine.identity) {
       return Response.json(
         { error: 'پاسخ موتور تحلیل قابل استفاده نبود.' },
         { status: 502 },
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       inferredAnswers: engine.inferred_answers || {},
       questions: engine.questions,
       conditionalQuestions: engine.conditional_questions || [],
-      questionnaireVersion: engine.version,
+      questionnaireIdentity: engine.identity,
       questionnaireSource: engine.source,
       autoSummary: engine.auto_summary || [],
     });

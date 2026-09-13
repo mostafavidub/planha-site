@@ -7,7 +7,16 @@ test('project upload obtains the file-specific questionnaire from the central en
   assert.match(route, /api\/questionnaire\/analyze/);
   assert.match(route, /discipline=/);
   assert.match(route, /occupancy=/);
-  assert.match(route, /questionnaireVersion/);
+  assert.match(route, /questionnaireIdentity/);
+  assert.match(route, /engine\.identity/);
+  assert.doesNotMatch(route, /engine\.version/);
+});
+
+test('customer draft carries the living questionnaire identity without a hand-managed version', () => {
+  const panel = readFileSync('components/admin.tsx', 'utf8');
+  assert.match(panel, /questionnaireIdentity/);
+  assert.doesNotMatch(panel, /questionnaireVersion/);
+  assert.doesNotMatch(panel, /5\.1-single-source/);
 });
 
 test('user panel renders only questions returned for the uploaded file', () => {

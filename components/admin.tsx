@@ -182,7 +182,7 @@ type ProjectAnalysis = {
     input_type?: 'text' | 'number' | 'radio';
     options?: string[];
   }[];
-  questionnaireVersion?: string;
+  questionnaireIdentity?: string;
   questionnaireSource?: string;
   autoSummary?: string[];
   conditionalQuestions?: NonNullable<ProjectAnalysis['questions']>;
@@ -1597,7 +1597,8 @@ function NewProject({ data, update }: { data: Store; update: StoreUpdate }) {
             ? 'تحلیل هندسی تأییدشده'
             : 'مساحت صریح نقشه',
       analysisConfidence: analysis?.confidence || 0,
-      questionnaireVersion: analysis?.questionnaireVersion || '5.1-single-source',
+      questionnaireIdentity:
+        analysis?.questionnaireIdentity || 'mechanical-design-questionnaire',
       ...answers,
     };
     const draft: Project = {
