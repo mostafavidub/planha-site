@@ -21,9 +21,14 @@ export default function AdminEntry() {
   useEffect(() => {
     fetch('/api/admin/session', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((result) =>
-        setStatus(result && typeof result === 'object' && 'authenticated' in result && result.authenticated ? 'authenticated' : 'guest'),
-      )
+      .then((result) => {
+        const authenticated = Boolean(result && typeof result === 'object' && 'authenticated' in result && result.authenticated);
+        setStatus(authenticated ? 'authenticated' : 'guest');
+        if (authenticated && /\/(?:admin\/)?login\/?$/.test(window.location.pathname)) {
+          window.history.replaceState({}, '', window.location.hostname === 'admin.planha.com' ? '/users' : '/admin/users');
+          window.dispatchEvent(new Event('engi-route'));
+        }
+      })
       .catch(() => setStatus('guest'));
   }, []);
 
@@ -45,7 +50,7 @@ export default function AdminEntry() {
         throw new Error('credentials');
       }
       setStatus('authenticated');
-      window.history.replaceState({}, '', '/admin/users');
+      window.history.replaceState({}, '', window.location.hostname === 'admin.planha.com' ? '/users' : '/admin/users');
       window.dispatchEvent(new Event('engi-route'));
     } catch (cause) {
       setError(

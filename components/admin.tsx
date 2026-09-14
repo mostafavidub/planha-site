@@ -597,9 +597,22 @@ function navigate(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
   navigatePath(href);
 }
 function navigatePath(href: string) {
-  window.history.pushState({}, '', href);
+  window.history.pushState({}, '', canonicalPath(href));
   window.dispatchEvent(new Event('engi-route'));
   window.scrollTo({ top: 0, behavior: 'instant' });
+}
+function canonicalPath(href: string) {
+  if (typeof window === 'undefined') return href;
+  const host = window.location.hostname.toLowerCase();
+  if (host === 'admin.planha.com') {
+    const path = href.replace(/^\/admin(?=\/|$)/, '');
+    return path || '/users';
+  }
+  if (host === 'panel.planha.com') {
+    const path = href.replace(/^\/panel(?=\/|$)/, '');
+    return path || '/projects';
+  }
+  return href;
 }
 const en = (s: string) =>
   (
@@ -790,7 +803,7 @@ function Login({
     localStorage.setItem('engi-auth-user', id);
     window.dispatchEvent(new Event('engi-update'));
     me = id;
-    window.location.href = '/panel/projects';
+    window.location.href = canonicalPath('/panel/projects');
   }
   return (
     <main className="user-login" dir="rtl">
@@ -1014,20 +1027,20 @@ function Shell({
   function stopActing() {
     sessionStorage.removeItem('engi-impersonate');
     sessionStorage.removeItem('engi-impersonate-name');
-    window.history.replaceState({}, '', '/admin/users');
+    window.history.replaceState({}, '', canonicalPath('/admin/users'));
     window.dispatchEvent(new Event('engi-route'));
   }
   async function signOut() {
     if (admin) {
       await fetch('/api/admin/session', { method: 'DELETE' });
-      window.location.assign('/admin/login');
+      window.location.assign(canonicalPath('/admin/login'));
       return;
     }
     localStorage.removeItem('engi-auth-user');
     await fetch('/api/customer', { method: 'DELETE' });
     localStorage.removeItem('engi-auth-phone');
     setOpen(false);
-    window.location.assign('/panel/login');
+    window.location.assign(canonicalPath('/panel/login'));
   }
   return (
     <div
@@ -1062,8 +1075,8 @@ function Shell({
           {nav.map(([n, I, h]) => (
             <a
               key={h}
-              className={path.startsWith(h) ? 'on' : ''}
-              href={h}
+              className={path.startsWith(canonicalPath(h)) ? 'on' : ''}
+              href={canonicalPath(h)}
               onClick={(event) => navigate(event, h)}
             >
               <I />
@@ -1364,7 +1377,7 @@ function Dashboard({ data, admin }: { data: Store; admin: boolean }) {
             !admin && (
               <a
                 className="primary"
-                href="/panel/projects/new"
+                href={canonicalPath('/panel/projects/new')}
                 onClick={(e) => navigate(e, '/panel/projects/new')}
               >
                 <Plus />
@@ -3193,14 +3206,16 @@ function AdminDetail({
     if (!user) return;
     sessionStorage.setItem('engi-impersonate', user.id);
     sessionStorage.setItem('engi-impersonate-name', en(user.name));
-    location.href = '/panel/projects';
+    location.href = window.location.hostname === 'admin.planha.com'
+      ? 'https://panel.planha.com/projects'
+      : canonicalPath('/panel/projects');
   }
   return (
     <Shell admin>
       <article>
         <div className="detail-head">
           <a
-            href={`/admin/${kind}`}
+            href={canonicalPath(`/admin/${kind}`)}
             onClick={(e) => navigate(e, `/admin/${kind}`)}
           >
             ← Back to {kind}
@@ -3863,7 +3878,7 @@ function ProfileSafe({ data, update }: { data: Store; update: StoreUpdate }) {
     }
     let mobile = localStorage.getItem('engi-auth-phone') || '';
     if (!mobile) {
-      location.replace('/panel/login');
+      location.replace(canonicalPath('/panel/login'));
       return;
     }
     let created: User = {
@@ -4098,7 +4113,7 @@ function Simple({
             projects && (
               <a
                 className="primary"
-                href="/panel/projects/new"
+                href={canonicalPath('/panel/projects/new')}
                 onClick={(e) => navigate(e, '/panel/projects/new')}
               >
                 <Plus />
@@ -4147,9 +4162,10 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
     [data, update] = useStore(),
     p = path.split('/').filter(Boolean),
     admin = mode ? mode === 'admin' : p[0] === 'admin',
-    page = p[1] || (admin ? 'users' : 'login'),
-    id = p[2],
-    action = p[3],
+    scoped = p[0] === (admin ? 'admin' : 'panel') ? p.slice(1) : p,
+    page = scoped[0] || (admin ? 'users' : 'login'),
+    id = scoped[1],
+    action = scoped[2],
     auth = '',
     acting = '';
   const [session, setSession] = useState<{
@@ -4186,11 +4202,18 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
     return () => {cancelled = true; clearInterval(timer); window.removeEventListener('engi-admin-refresh', refresh);};
   }, [admin]);
   useEffect(() => {
+    const expected = canonicalPath(path);
+    if (expected !== path) {
+      window.history.replaceState({}, '', expected);
+      window.dispatchEvent(new Event('engi-route'));
+    }
+  }, [path]);
+  useEffect(() => {
     if (admin) return;
     const incoming = new URLSearchParams(location.hash.slice(1)).get('handoff');
     if (incoming && /^[A-Za-z0-9_-]{40,100}$/.test(incoming)) {
       sessionStorage.setItem('engi-handoff', incoming);
-      history.replaceState({}, '', '/panel/projects/new');
+      history.replaceState({}, '', canonicalPath('/panel/projects/new'));
     }
     const syncSession = async () => {
       try {
@@ -4241,6 +4264,12 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
   auth = session?.auth || '';
   acting = session?.acting || '';
   if (!admin) me = acting || auth || '';
+  if (!admin && (auth || acting) && page === 'login') {
+    const destination = canonicalPath('/panel/projects');
+    window.history.replaceState({}, '', destination);
+    window.dispatchEvent(new Event('engi-route'));
+    return <div className="entry-loading" aria-label="در حال آماده‌سازی پنل" />;
+  }
   // A valid server session always wins over a stale /panel/login URL. This also
   // makes login resilient when a browser delays or suppresses client navigation.
   if (!admin && !auth && !acting) return <LoginSafe />;

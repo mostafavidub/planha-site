@@ -1,5 +1,5 @@
 import DomainEntry from '@/components/domain-entry';
 
-export default function Home() {
+export default function Page() {
   return <DomainEntry />;
 }
