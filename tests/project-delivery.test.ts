@@ -29,7 +29,18 @@ test('customer project rows open an accessible progress dialog', () => {
   assert.match(ui, /className=\{on \? 'project-row-clickable'/);
   assert.match(ui, /role=\{on \? 'button'/);
   assert.match(ui, /function ProjectProgressDialog/);
-  assert.match(ui, /on=\{\(project\) => setSelectedId\(project\.id\)\}/);
+  assert.match(ui, /setSelectedId\(project\.id\)/);
+});
+
+test('unpaid quoted projects resume the saved payment step instead of restarting', () => {
+  assert.match(ui, /engineStatus === 'awaiting_payment' \|\| project\.paymentRequired/);
+  assert.match(ui, /\? 'در انتظار پرداخت'/);
+  assert.match(ui, /navigatePath\(`\/panel\/projects\/\$\{project\.id\}\/payment`\)/);
+  assert.match(ui, /resumeProject\.checkoutState !== 'awaiting_payment'/);
+  assert.match(ui, /setPrepared\(resumeProject\)/);
+  assert.match(ui, /setQuotedAmount\(resumeProject\.amount\)/);
+  assert.match(ui, /setStep\(3\)/);
+  assert.match(ui, /action === 'payment'/);
 });
 
 test('progress is polled from persisted engine milestones instead of simulated', () => {

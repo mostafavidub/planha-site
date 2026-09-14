@@ -40,7 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-type Status = 'در حال بررسی' | 'در حال پردازش' | 'نیازمند اصلاح' | 'تکمیل شده';
+type Status = 'در حال بررسی' | 'در انتظار پرداخت' | 'در حال پردازش' | 'نیازمند اصلاح' | 'تکمیل شده';
 type User = {
   id: string;
   name: string;
@@ -60,6 +60,9 @@ type User = {
 };
 type Project = {
   quoteToken?: string;
+  checkoutState?: 'draft' | 'awaiting_payment' | 'paid';
+  paymentRequired?: boolean;
+  resumeAction?: 'payment';
   id: string;
   owner: string;
   title: string;
@@ -400,6 +403,8 @@ function mergeEngineState(project: Project, state?: EngineProjectState): Project
         ? project.status
         : state.output_ready || engineStatus === 'ready'
         ? 'تکمیل شده'
+        : engineStatus === 'awaiting_payment' || project.paymentRequired
+          ? 'در انتظار پرداخت'
         : engineStatus === 'failed' || engineStatus === 'asking'
           ? 'نیازمند اصلاح'
           : 'در حال پردازش',
@@ -1390,7 +1395,7 @@ function Dashboard({ data, admin }: { data: Store; admin: boolean }) {
     </Shell>
   );
 }
-function NewProject({ data, update }: { data: Store; update: StoreUpdate }) {
+function NewProject({ data, update, resumeProject }: { data: Store; update: StoreUpdate; resumeProject?: Project | null }) {
   const plans = data.plans.filter((p) => p.enabled),
     user = data.users.find((x) => x.id === me);
   const [step, setStep] = useState(1),
@@ -1453,6 +1458,24 @@ function NewProject({ data, update }: { data: Store; update: StoreUpdate }) {
       group: 'ورودی‌های فنی موتور طراحی',
     }))
     .filter((question) => !analysis?.inferredAnswers?.[question.id]);
+
+  useEffect(() => {
+    if (!resumeProject || resumeProject.checkoutState !== 'awaiting_payment') return;
+    draftProjectId.current = resumeProject.id;
+    setPrepared(resumeProject);
+    setTitle(resumeProject.title);
+    setService(resumeProject.service);
+    setAnswers(
+      Object.fromEntries(
+        Object.entries(resumeProject.answers || {}).map(([key, value]) => [key, String(value)]),
+      ),
+    );
+    setManualArea(String(resumeProject.area || ''));
+    setAnalysisConfirmed(true);
+    setQuotedAmount(resumeProject.amount);
+    setStep(3);
+    setError('');
+  }, [resumeProject?.id, resumeProject?.quoteToken]);
   const plan = plans.find((p) => p.name === service) || plans[0],
     base = Math.max(
       plan?.minimumPrice || 0,
@@ -4090,7 +4113,13 @@ function Simple({
             <Projects
               data={data}
               own
-              on={(project) => setSelectedId(project.id)}
+              on={(project) => {
+                if (project.checkoutState === 'awaiting_payment' || project.paymentRequired) {
+                  navigatePath(`/panel/projects/${project.id}/payment`);
+                  return;
+                }
+                setSelectedId(project.id);
+              }}
             />
           </section>
         ) : (
@@ -4120,6 +4149,7 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
     admin = mode ? mode === 'admin' : p[0] === 'admin',
     page = p[1] || (admin ? 'users' : 'login'),
     id = p[2],
+    action = p[3],
     auth = '',
     acting = '';
   const [session, setSession] = useState<{
@@ -4218,6 +4248,11 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
   if (!admin) {
     if (page === 'projects' && id === 'new')
       return <NewProject data={data} update={update} />;
+    if (page === 'projects' && id && action === 'payment') {
+      const resumeProject = data.projects.find((project) => project.id === id);
+      if (resumeProject?.checkoutState === 'awaiting_payment' || resumeProject?.paymentRequired)
+        return <NewProject data={data} update={update} resumeProject={resumeProject} />;
+    }
     if (page === 'projects')
       return <Simple projects data={data} update={update} />;
     if (page === 'transactions' || page === 'wallet')
