@@ -1672,6 +1672,19 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
         reason.payload.questions?.length
       ) {
         const supplementary = reason.payload.questions;
+        // A question returned with `status: asking` is authoritative: it must
+        // stay visible even when the earlier upload analysis inferred a value
+        // for the same key.  Keeping that stale inference used to filter the
+        // required control out of `analysisQuestions`, leaving the checkout
+        // stuck on "one supplementary question" with no field to answer.
+        const supplementaryKeys = new Set(
+          supplementary.map((question) => question.key),
+        );
+        const retainedInferences = Object.fromEntries(
+          Object.entries(reason.payload.inferred_answers || {}).filter(
+            ([key]) => !supplementaryKeys.has(key),
+          ),
+        );
         setAnalysis((current) =>
           current
             ? {
@@ -1679,13 +1692,16 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
                 questions: supplementary,
                 inferredAnswers: {
                   ...current.inferredAnswers,
-                  ...(reason.payload.inferred_answers || {}),
+                  ...retainedInferences,
+                  ...Object.fromEntries(
+                    supplementary.map((question) => [question.key, '']),
+                  ),
                 },
               }
             : current,
         );
         setAnswers((current) => ({
-          ...(reason.payload.inferred_answers || {}),
+          ...retainedInferences,
           ...current,
         }));
         setQuestionStage('analysis');
