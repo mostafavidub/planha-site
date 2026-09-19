@@ -246,9 +246,43 @@ function readStore() {
   }
   return storeCache!;
 }
+function compactStoreForPersistence(store: Store): Store {
+  // Engine-backed projects and their transactions are durable on the server and
+  // are refreshed by applyCustomerState. Persisting their full analysis and
+  // timeline payloads exhausts the browser quota after a handful of projects.
+  const localProjects = store.projects.filter((project) => !project.engineProjectId);
+  const localProjectIds = new Set(localProjects.map((project) => project.id));
+  return {
+    ...store,
+    users: store.users.map((user) => ({
+      ...user,
+      // Legacy data URLs can be several megabytes. The uploaded avatar URL is
+      // authoritative; omit only inline binary data from browser persistence.
+      avatar: user.avatar?.startsWith('data:') ? undefined : user.avatar,
+    })),
+    projects: localProjects,
+    tx: store.tx.filter(
+      (transaction) =>
+        localProjectIds.has(transaction.project) ||
+        !transaction.owner.startsWith('CUST-'),
+    ),
+  };
+}
 function writeStore(store: Store) {
   storeCache = store;
-  localStorage.setItem('engi-store', JSON.stringify(store));
+  const compact = compactStoreForPersistence(store);
+  try {
+    localStorage.setItem('engi-store', JSON.stringify(compact));
+  } catch {
+    // Storage is an optimization, never a prerequisite for authentication.
+    // Clear an oversized legacy snapshot and retain the resumable local drafts.
+    try {
+      localStorage.removeItem('engi-store');
+      localStorage.setItem('engi-store', JSON.stringify(compact));
+    } catch {
+      // Private browsing or a disabled storage backend must not break the app.
+    }
+  }
 }
 async function uploadAvatarFile(userId: string, file: Blob, oldKey = '') {
   const form = new FormData();
@@ -4254,7 +4288,14 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
         setSession({ auth: result.userId, acting: sessionStorage.getItem('engi-impersonate') || '' });
         if (pendingProjects.length) {
           const syncKey = `engi-project-sync:${result.userId}`;
-          const fingerprint = JSON.stringify(pendingProjects);
+          const fingerprint = JSON.stringify(
+            pendingProjects.map((project) => [
+              project.id,
+              project.status,
+              project.engineProjectId || 0,
+              project.engineRevision || 0,
+            ]),
+          );
           if (localStorage.getItem(syncKey) !== fingerprint) {
             void customerRequest('import', { projects: pendingProjects }).then((durableState) => {
               localStorage.setItem(syncKey, fingerprint);
