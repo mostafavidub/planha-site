@@ -757,11 +757,16 @@ function useStore() {
   useEffect(() => {
     const sync = () => {
       try {
-        storeCache = null;
+        // Same-tab updates have already written the complete server snapshot to
+        // storeCache. Clearing it here would replace that snapshot with the
+        // intentionally compact browser copy and temporarily hide every
+        // engine-backed project until the next poll.
         setData(readStore());
       } catch {}
     };
     const storageSync = () => {
+      // A real storage event originates in another tab, so its persisted
+      // snapshot is the source we need to re-read.
       storeCache = null;
       sync();
     };

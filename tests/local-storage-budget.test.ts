@@ -28,3 +28,13 @@ test('project migration fingerprint remains bounded', () => {
   );
   assert.doesNotMatch(ui, /const fingerprint = JSON\.stringify\(pendingProjects\);/);
 });
+
+test('same-tab updates retain the complete server snapshot in memory', () => {
+  const hook = ui.slice(ui.indexOf('function useStore'), ui.indexOf('const an ='));
+  const sameTabSync = hook.slice(
+    hook.indexOf('const sync ='),
+    hook.indexOf('const storageSync ='),
+  );
+  assert.doesNotMatch(sameTabSync, /storeCache = null/);
+  assert.match(hook, /const storageSync = \(\) => \{[\s\S]*storeCache = null;[\s\S]*sync\(\)/);
+});
