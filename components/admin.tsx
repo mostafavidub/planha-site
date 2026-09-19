@@ -4283,7 +4283,9 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
           writeStore(localStore);
         }
         const pendingProjects = localUserId.startsWith('CUST-')
-          ? localStore.projects.filter((project) => project.owner === localUserId)
+          ? localStore.projects.filter(
+              (project) => project.owner === localUserId && !project.engineProjectId,
+            )
           : [];
         // Establish the authenticated session first; migration is secondary and
         // must not prevent the customer from entering the panel.

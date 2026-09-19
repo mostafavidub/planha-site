@@ -29,6 +29,13 @@ test('project migration fingerprint remains bounded', () => {
   assert.doesNotMatch(ui, /const fingerprint = JSON\.stringify\(pendingProjects\);/);
 });
 
+test('only unsynced local drafts are imported into the durable account', () => {
+  assert.match(
+    ui,
+    /pendingProjects = localUserId\.startsWith\('CUST-'\)[\s\S]*project\.owner === localUserId && !project\.engineProjectId/,
+  );
+});
+
 test('same-tab updates retain the complete server snapshot in memory', () => {
   const hook = ui.slice(ui.indexOf('function useStore'), ui.indexOf('const an ='));
   const sameTabSync = hook.slice(
