@@ -1,0 +1,29 @@
+name: Site CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate types
+        run: npm run typecheck
+      - name: Run Site tests
+        run: npm run test:analysis
+      - name: Validate Local Staging contract
+        run: npm run test:local-staging-contract
+      - name: Build production Worker bundle
+        run: npm run build

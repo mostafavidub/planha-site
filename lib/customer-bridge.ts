@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers';
 
-export const ENGINE = 'https://web-app-staging-production.up.railway.app';
+// A missing binding must fail closed. In particular, local development and CI
+// must never silently wake the online Staging backend.
+export const ENGINE =
+  (env as unknown as { PLANHA_ENGINE_URL?: string }).PLANHA_ENGINE_URL?.trim().replace(/\/+$/, '') ||
+  'http://127.0.0.1:0';
 export const customerCookie = 'engi_customer_session';
 export function customerSession(request: Request) {
   return request.headers.get('cookie')?.split(';').map(x => x.trim())

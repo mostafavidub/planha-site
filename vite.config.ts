@@ -8,6 +8,13 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   '00000000-0000-4000-8000-000000000000';
 
 const { d1, r2 } = hostingConfig;
+const localEngineUrl = process.env.PLANHA_LOCAL_ENGINE_URL?.trim();
+const localBridgeToken = process.env.PLANHA_LOCAL_BRIDGE_TOKEN?.trim();
+const localVars: Record<string, string> = {};
+if (localEngineUrl && localBridgeToken) {
+  localVars.PLANHA_ENGINE_URL = localEngineUrl;
+  localVars.PANEL_BRIDGE_TOKEN = localBridgeToken;
+}
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
@@ -32,6 +39,7 @@ const localBindingConfig = {
         },
       ]
     : [],
+  vars: localVars,
 };
 
 export default defineConfig(async () => {

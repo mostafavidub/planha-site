@@ -5,5 +5,6 @@ declare namespace Cloudflare {
     ADMIN_SESSION_SECRET: string;
     ADMIN_PASSWORD_PEPPER: string;
     PANEL_BRIDGE_TOKEN: string;
+    PLANHA_ENGINE_URL?: string;
   }
 }
