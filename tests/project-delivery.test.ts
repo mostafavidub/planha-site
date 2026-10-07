@@ -46,7 +46,9 @@ test('unpaid quoted projects resume the saved payment step instead of restarting
 test('progress is polled from persisted engine milestones instead of simulated', () => {
   assert.match(ui, /action:\s*'status'/);
   assert.match(ui, /progress\?\.percent \?\? state\.progress/);
-  assert.match(ui, /window\.setInterval\(syncSession, 4000\)/);
+  assert.match(ui, /adaptiveCustomerDelay\(unchangedResponses\)/);
+  assert.match(ui, /hasActiveCustomerProject\(readStore\(\)\.projects\)/);
+  assert.doesNotMatch(ui, /window\.setInterval\(syncSession, 4000\)/);
   assert.doesNotMatch(ui, /Promise\.allSettled\(active\.map\(readDesignProjectState\)\)/);
   assert.ok(!ui.includes('setInterval(() => setProgress(progress +'));
 });
