@@ -34,6 +34,16 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { DesignQuestion } from '@/lib/design-questionnaire';
 import {
+  ADMIN_VISIBLE_DELAY_MS,
+  LIFECYCLE_REFRESH_STALE_MS,
+  adaptiveCustomerDelay,
+  adminSnapshotFingerprint,
+  customerErrorDelay,
+  customerSnapshotFingerprint,
+  hasActiveCustomerProject,
+  shouldRunBackgroundPolling,
+} from '@/lib/snapshot-polling';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -132,8 +142,9 @@ type EngineProjectState = {
 };
 class DesignProjectRequestError extends Error {
   payload: EngineProjectState;
+  status?: number;
 
-  constructor(payload: EngineProjectState) {
+  constructor(payload: EngineProjectState, status?: number) {
     super(
       payload.failure?.message ||
         payload.last_error ||
@@ -142,6 +153,7 @@ class DesignProjectRequestError extends Error {
         'اتصال به موتور تولید انجام نشد.',
     );
     this.payload = payload;
+    this.status = status;
   }
 }
 type Tx = {
@@ -360,7 +372,7 @@ async function designProjectRequest(body: Record<string, unknown>) {
 async function customerRequest(action: string, body: Record<string, unknown> = {}) {
   const response = await fetch('/api/customer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, action }) });
   const payload = await response.json() as any;
-  if (!response.ok) throw new DesignProjectRequestError(payload);
+  if (!response.ok) throw new DesignProjectRequestError(payload, response.status);
   return payload;
 }
 function customerProject(row: any): Project {
@@ -404,6 +416,7 @@ function applyCustomerState(payload: any) {
     tx: [...(payload.transactions || []), ...current.tx.filter(t => t.owner !== payload.userId)],
   });
   window.dispatchEvent(new Event('engi-update'));
+  window.dispatchEvent(new Event('planha-customer-state-applied'));
 }
 function mergeEngineState(project: Project, state?: EngineProjectState): Project {
   // Projects created before engine tracking was introduced legitimately have
@@ -4231,30 +4244,73 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
   useEffect(() => {
     if (!admin) return;
     let cancelled = false;
-    let running = false;
-    const refresh = async () => {
-      if (running) return;
-      running = true;
-      try {
-        const response = await fetch('/api/admin/accounts', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({action:'state'}) });
-        const result = await response.json() as { users: User[]; projects: any[]; transactions: Tx[]; error?: string };
-        if (!response.ok) throw new Error(result.error || 'Accounts unavailable');
-        if (!cancelled) {
-          // Keep legacy project/download records until their ownership migration is approved.
-          update(current => ({...current,
-            users: [...current.users.filter(u => !u.id.startsWith('CUST-')), ...result.users],
-            projects: [...current.projects.filter(p => !p.owner.startsWith('CUST-')), ...result.projects.map(customerProject)],
-            tx: [...current.tx.filter(t => !t.owner.startsWith('CUST-')), ...result.transactions],
-          }));
-          setAccountError('');
-        }
-      } catch { if (!cancelled) setAccountError('حساب‌های سرور در دسترس نیستند؛ موجودی نمایش‌داده‌شده ممکن است قدیمی باشد.'); }
-      finally { running = false; }
+    let timer: number | undefined;
+    let inFlight: Promise<void> | null = null;
+    let lastCompletedAt = 0;
+    let lastFingerprint = '';
+    const clearTimer = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
     };
+    const schedule = () => {
+      clearTimer();
+      if (cancelled || document.hidden || !navigator.onLine) return;
+      timer = window.setTimeout(() => void refresh(), ADMIN_VISIBLE_DELAY_MS);
+    };
+    const refresh = async () => {
+      if (cancelled || document.hidden || !navigator.onLine) return;
+      if (inFlight) return inFlight;
+      clearTimer();
+      inFlight = (async () => {
+        try {
+          const response = await fetch('/api/admin/accounts', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({action:'state'}) });
+          const result = await response.json() as { users: User[]; projects: any[]; transactions: Tx[]; error?: string };
+          if (!response.ok) throw new Error(result.error || 'Accounts unavailable');
+          const fingerprint = adminSnapshotFingerprint(result);
+          if (!cancelled && fingerprint !== lastFingerprint) {
+            lastFingerprint = fingerprint;
+            // Keep legacy project/download records until their ownership migration is approved.
+            update(current => ({...current,
+              users: [...current.users.filter(u => !u.id.startsWith('CUST-')), ...result.users],
+              projects: [...current.projects.filter(p => !p.owner.startsWith('CUST-')), ...result.projects.map(customerProject)],
+              tx: [...current.tx.filter(t => !t.owner.startsWith('CUST-')), ...result.transactions],
+            }));
+          }
+          if (!cancelled) setAccountError('');
+        } catch {
+          if (!cancelled) setAccountError('حساب‌های سرور در دسترس نیستند؛ موجودی نمایش‌داده‌شده ممکن است قدیمی باشد.');
+        } finally {
+          lastCompletedAt = Date.now();
+          inFlight = null;
+          schedule();
+        }
+      })();
+      return inFlight;
+    };
+    const lifecycleRefresh = () => {
+      if (document.hidden || !navigator.onLine) {
+        clearTimer();
+        return;
+      }
+      if (Date.now() - lastCompletedAt >= LIFECYCLE_REFRESH_STALE_MS) void refresh();
+      else schedule();
+    };
+    const mutationRefresh = () => void refresh();
     void refresh();
-    const timer = window.setInterval(refresh, 10000);
-    window.addEventListener('engi-admin-refresh', refresh);
-    return () => {cancelled = true; clearInterval(timer); window.removeEventListener('engi-admin-refresh', refresh);};
+    window.addEventListener('engi-admin-refresh', mutationRefresh);
+    window.addEventListener('focus', lifecycleRefresh);
+    window.addEventListener('online', lifecycleRefresh);
+    window.addEventListener('offline', lifecycleRefresh);
+    document.addEventListener('visibilitychange', lifecycleRefresh);
+    return () => {
+      cancelled = true;
+      clearTimer();
+      window.removeEventListener('engi-admin-refresh', mutationRefresh);
+      window.removeEventListener('focus', lifecycleRefresh);
+      window.removeEventListener('online', lifecycleRefresh);
+      window.removeEventListener('offline', lifecycleRefresh);
+      document.removeEventListener('visibilitychange', lifecycleRefresh);
+    };
   }, [admin]);
   useEffect(() => {
     const expected = canonicalPath(path);
@@ -4270,8 +4326,38 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
       sessionStorage.setItem('engi-handoff', incoming);
       history.replaceState({}, '', canonicalPath('/panel/projects/new'));
     }
+    let cancelled = false;
+    let timer: number | undefined;
+    let inFlight: Promise<void> | null = null;
+    let lastCompletedAt = 0;
+    let lastFingerprint = '';
+    let unchangedResponses = 0;
+    let consecutiveErrors = 0;
+    let authFailed = false;
+    const clearTimer = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+    };
+    const schedule = (delay: number) => {
+      clearTimer();
+      const active = hasActiveCustomerProject(readStore().projects);
+      if (
+        cancelled ||
+        authFailed ||
+        !shouldRunBackgroundPolling({
+          visible: !document.hidden,
+          online: navigator.onLine,
+          active,
+        })
+      ) return;
+      timer = window.setTimeout(() => void syncSession(), delay);
+    };
     const syncSession = async () => {
-      try {
+      if (cancelled || authFailed || document.hidden || !navigator.onLine) return;
+      if (inFlight) return inFlight;
+      clearTimer();
+      inFlight = (async () => {
+        try {
         const localUserId = localStorage.getItem('engi-auth-user') || '';
         let localStore = readStore();
         const repairKey = 'engi-project-owner-repair-cust-27-v1';
@@ -4290,9 +4376,19 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
         // Establish the authenticated session first; migration is secondary and
         // must not prevent the customer from entering the panel.
         const result = await customerRequest('state');
+        const fingerprint = customerSnapshotFingerprint(result);
+        const changed = fingerprint !== lastFingerprint;
+        unchangedResponses = changed ? 0 : unchangedResponses + 1;
+        lastFingerprint = fingerprint;
+        consecutiveErrors = 0;
         localStorage.setItem('engi-auth-user', result.userId);
-        applyCustomerState(result);
-        setSession({ auth: result.userId, acting: sessionStorage.getItem('engi-impersonate') || '' });
+        if (changed) applyCustomerState(result);
+        const acting = sessionStorage.getItem('engi-impersonate') || '';
+        setSession((current) =>
+          current?.auth === result.userId && current?.acting === acting
+            ? current
+            : { auth: result.userId, acting },
+        );
         if (pendingProjects.length) {
           const syncKey = `engi-project-sync:${result.userId}`;
           const fingerprint = JSON.stringify(
@@ -4311,17 +4407,57 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
             }).catch(() => {});
           }
         }
-      } catch {
-        setSession({ auth: '', acting: '' });
-      }
+        schedule(adaptiveCustomerDelay(unchangedResponses));
+        } catch (reason) {
+          consecutiveErrors += 1;
+          if (
+            reason instanceof DesignProjectRequestError &&
+            (reason.status === 401 || reason.status === 403)
+          ) {
+            authFailed = true;
+            clearTimer();
+            setSession({ auth: '', acting: '' });
+          } else {
+            schedule(customerErrorDelay(consecutiveErrors));
+          }
+        } finally {
+          lastCompletedAt = Date.now();
+          inFlight = null;
+        }
+      })();
+      return inFlight;
     };
-    syncSession();
-    window.addEventListener('engi-auth', syncSession);
-    window.addEventListener('focus', syncSession);
-    // One account snapshot is the only background source for project state.
-    // Direct engine reads are reserved for an explicitly opened project dialog.
-    const timer = window.setInterval(syncSession, 4000);
-    return () => { window.removeEventListener('engi-auth', syncSession); window.removeEventListener('focus', syncSession); clearInterval(timer); };
+    const lifecycleRefresh = () => {
+      if (document.hidden || !navigator.onLine) {
+        clearTimer();
+        return;
+      }
+      if (Date.now() - lastCompletedAt >= LIFECYCLE_REFRESH_STALE_MS) void syncSession();
+      else schedule(adaptiveCustomerDelay(unchangedResponses));
+    };
+    const explicitRefresh = () => {
+      authFailed = false;
+      void syncSession();
+    };
+    void syncSession();
+    window.addEventListener('engi-auth', explicitRefresh);
+    window.addEventListener('planha-customer-state-applied', explicitRefresh);
+    window.addEventListener('engi-route', lifecycleRefresh);
+    window.addEventListener('focus', lifecycleRefresh);
+    window.addEventListener('online', lifecycleRefresh);
+    window.addEventListener('offline', lifecycleRefresh);
+    document.addEventListener('visibilitychange', lifecycleRefresh);
+    return () => {
+      cancelled = true;
+      clearTimer();
+      window.removeEventListener('engi-auth', explicitRefresh);
+      window.removeEventListener('planha-customer-state-applied', explicitRefresh);
+      window.removeEventListener('engi-route', lifecycleRefresh);
+      window.removeEventListener('focus', lifecycleRefresh);
+      window.removeEventListener('online', lifecycleRefresh);
+      window.removeEventListener('offline', lifecycleRefresh);
+      document.removeEventListener('visibilitychange', lifecycleRefresh);
+    };
   }, [admin]);
   if (!admin && !session)
     return <div className="entry-loading" aria-label="در حال آماده‌سازی پنل" />;
