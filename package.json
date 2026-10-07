@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
+    "staging:local": "PLANHA_LOCAL_ENGINE_URL=http://127.0.0.1:8080 PLANHA_LOCAL_BRIDGE_TOKEN=planha-local-staging-bridge-only npm run build && npm run start",
     "test:analysis": "tsx --test tests/*.test.ts",
     "lint": "oxlint",
     "format": "oxfmt"

@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:workers';
 
-export const ENGINE = 'https://web-app-staging-production.up.railway.app';
+export const ENGINE =
+  (env as unknown as { PLANHA_ENGINE_URL?: string }).PLANHA_ENGINE_URL?.trim() ||
+  'https://web-app-staging-production.up.railway.app';
 export const customerCookie = 'engi_customer_session';
 export function customerSession(request: Request) {
   return request.headers.get('cookie')?.split(';').map(x => x.trim())
