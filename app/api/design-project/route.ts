@@ -71,8 +71,6 @@ export async function POST(request: Request) {
       return Response.json({
         error: 'تحلیل این فایل با قرارداد فعلی ثبت نشده است؛ فایل را دوباره تحلیل کنید.',
       }, { status: 409 });
-    const object = await (env.FILES as R2Bucket).get(fileKey);
-    if (!object) return Response.json({ error: 'فایل پروژه پیدا نشد.' }, { status: 404 });
     const form = new FormData();
     form.append('external_project_id', projectId);
     form.append('external_user_id', userId);

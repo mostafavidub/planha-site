@@ -374,6 +374,8 @@ async function analyzeStoredProjectFile(
     form.append('userId', userId);
     form.append('discipline', discipline);
     form.append('occupancy', occupancy);
+    if (current.name) form.append('name', current.name);
+    if (typeof current.size === 'number') form.append('size', String(current.size));
     if (current.analysisJobId) form.append('analysisJobId', current.analysisJobId);
     const response = await fetch('/api/project-file', { method: 'POST', body: form });
     const body = await response.json() as ProjectUpload & { error?: string };

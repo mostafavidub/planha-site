@@ -5,7 +5,8 @@ import test from 'node:test';
 const ui = readFileSync(new URL('../components/admin.tsx', import.meta.url), 'utf8');
 const bridge = readFileSync(new URL('../app/api/design-project/route.ts', import.meta.url), 'utf8');
 const output = readFileSync(new URL('../app/api/design-project/output/route.ts', import.meta.url), 'utf8');
-const projectFile = readFileSync(new URL('../app/api/project-file/route.ts', import.meta.url), 'utf8');
+const projectFile = readFileSync(new URL('../lib/project-file-handler.ts', import.meta.url), 'utf8');
+const projectFileRoute = readFileSync(new URL('../app/api/project-file/route.ts', import.meta.url), 'utf8');
 const questionnaire = readFileSync(new URL('../app/api/questionnaire/route.ts', import.meta.url), 'utf8');
 
 test('payment delegates the debit and queue to authoritative server checkout', () => {
@@ -88,7 +89,8 @@ test('download is available only after the engine marks output ready', () => {
 
 test('server bridge keeps service credentials and stored files off the browser', () => {
   assert.match(bridge, /PANEL_BRIDGE_TOKEN/);
-  assert.match(bridge, /env\.FILES/);
+  assert.doesNotMatch(bridge, /env\.FILES/);
+  assert.match(projectFileRoute, /env\.FILES/);
   assert.match(bridge, /x-panel-token/);
   assert.doesNotMatch(ui, /PANEL_BRIDGE_TOKEN|x-panel-token/);
 });
@@ -103,7 +105,7 @@ test('finalization transports only the canonical ready job identity', () => {
 });
 
 test('all design routes share one environment-specific engine origin', () => {
-  for (const route of [bridge, output, projectFile, questionnaire]) {
+  for (const route of [bridge, output, projectFileRoute, questionnaire]) {
     assert.match(route, /(?:import|,).*ENGINE/);
     assert.doesNotMatch(route, /web-app-production-3d3b\.up\.railway\.app/);
   }
