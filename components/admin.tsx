@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { DesignQuestion } from '@/lib/design-questionnaire';
+import { pollQuestionnaireJob } from '@/lib/questionnaire-job';
 import {
   ADMIN_VISIBLE_DELAY_MS,
   LIFECYCLE_REFRESH_STALE_MS,
@@ -72,7 +73,7 @@ type Project = {
   quoteToken?: string;
   checkoutState?: 'draft' | 'awaiting_payment' | 'paid';
   paymentRequired?: boolean;
-  resumeAction?: 'payment';
+  resumeAction?: 'complete' | 'payment';
   id: string;
   owner: string;
   title: string;
@@ -88,6 +89,8 @@ type Project = {
   note?: string;
   fileKey?: string;
   fileName?: string;
+  analysisJobId?: string;
+  analysis?: ProjectAnalysis;
   answers?: Record<string, string | number>;
   paymentMethod?: 'wallet' | 'gateway';
   engineProjectId?: number;
@@ -201,6 +204,15 @@ type ProjectAnalysis = {
   questionnaireSource?: string;
   autoSummary?: string[];
   conditionalQuestions?: NonNullable<ProjectAnalysis['questions']>;
+};
+type ProjectUpload = {
+  key: string;
+  name: string;
+  size?: number;
+  analysis?: ProjectAnalysis;
+  analysisPending?: boolean;
+  analysisJobId?: string;
+  analysisError?: string;
 };
 type StoreUpdate = (fn: (store: Store) => Store) => void;
 const defaultPlans: Plan[] = [
@@ -317,12 +329,7 @@ async function uploadProjectFile(
   form.append('userId', userId);
   form.append('discipline', discipline);
   form.append('occupancy', occupancy);
-  return new Promise<{
-    key: string;
-    name: string;
-    size: number;
-    analysis: ProjectAnalysis;
-  }>((resolve, reject) => {
+  return new Promise<ProjectUpload>((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open('POST', '/api/project-file');
     request.upload.onprogress = (event) => {
@@ -338,6 +345,9 @@ async function uploadProjectFile(
         name?: string;
         size?: number;
         analysis?: ProjectAnalysis;
+        analysisPending?: boolean;
+        analysisJobId?: string;
+        analysisError?: string;
         error?: string;
       } = {};
       try {
@@ -345,18 +355,40 @@ async function uploadProjectFile(
       } catch {}
       if (request.status >= 200 && request.status < 300 && body.key) {
         onProgress(100);
-        resolve(
-          body as {
-            key: string;
-            name: string;
-            size: number;
-            analysis: ProjectAnalysis;
-          },
-        );
+        resolve(body as ProjectUpload);
       } else reject(new Error(body.error || `خطای آپلود (${request.status})`));
     };
     request.send(form);
   });
+}
+async function analyzeStoredProjectFile(
+  userId: string,
+  upload: ProjectUpload,
+  discipline: 'mechanical' | 'electrical',
+  occupancy: string,
+  onPending: (upload: ProjectUpload) => Promise<void> | void,
+) {
+  const readStatus = async (current: ProjectUpload) => {
+    const form = new FormData();
+    form.append('key', current.key);
+    form.append('userId', userId);
+    form.append('discipline', discipline);
+    form.append('occupancy', occupancy);
+    if (current.name) form.append('name', current.name);
+    if (typeof current.size === 'number') form.append('size', String(current.size));
+    if (current.analysisJobId) form.append('analysisJobId', current.analysisJobId);
+    const response = await fetch('/api/project-file', { method: 'POST', body: form });
+    const body = await response.json() as ProjectUpload & { error?: string };
+    if (!response.ok || !body.key)
+      throw new Error(body.error || 'ادامه تحلیل فایل انجام نشد.');
+    return { ...current, ...body, analysisJobId: body.analysisJobId || current.analysisJobId };
+  };
+  return pollQuestionnaireJob(
+    upload,
+    readStatus,
+    onPending,
+    (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
+  );
 }
 async function designProjectRequest(body: Record<string, unknown>) {
   const response = await fetch('/api/design-project', {
@@ -487,12 +519,15 @@ function reconcileProjectSnapshot(current: Project | undefined, incoming: Projec
 async function startDesignProject(project: Project) {
   if (!project.fileKey || !project.fileName)
     throw new Error('فایل ذخیره‌شده پروژه پیدا نشد؛ فایل را دوباره بارگذاری کنید.');
+  if (!/^[0-9a-f]{32}$/.test(project.analysisJobId || ''))
+    throw new Error('تحلیل این فایل قدیمی یا ناقص است؛ فایل را دوباره تحلیل کنید.');
   const state = await designProjectRequest({
     projectId: project.id,
     userId: project.owner,
     title: project.title,
     fileKey: project.fileKey,
     fileName: project.fileName,
+    analysisJobId: project.analysisJobId,
     discipline: project.service === 'طراحی برق' ? 'electrical' : 'mechanical',
     occupancy: project.answers?.kind || '',
     answers: project.answers || {},
@@ -1466,7 +1501,7 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
   const [step, setStep] = useState(1),
     [title, setTitle] = useState(''),
     [file, setFile] = useState<File | null>(null),
-    [upload, setUpload] = useState<{ key: string; name: string } | null>(null),
+    [upload, setUpload] = useState<ProjectUpload | null>(null),
     [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
@@ -1525,7 +1560,7 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
     .filter((question) => !analysis?.inferredAnswers?.[question.id]);
 
   useEffect(() => {
-    if (!resumeProject || resumeProject.checkoutState !== 'awaiting_payment') return;
+    if (!resumeProject || !['draft', 'awaiting_payment'].includes(resumeProject.checkoutState || '')) return;
     draftProjectId.current = resumeProject.id;
     setPrepared(resumeProject);
     setTitle(resumeProject.title);
@@ -1536,9 +1571,17 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
       ),
     );
     setManualArea(String(resumeProject.area || ''));
-    setAnalysisConfirmed(true);
+    setUpload(resumeProject.fileKey ? {
+      key: resumeProject.fileKey,
+      name: resumeProject.fileName || 'project.dxf',
+      analysisJobId: resumeProject.analysisJobId,
+      analysisPending: Boolean(resumeProject.analysisJobId && !resumeProject.analysis),
+      analysis: resumeProject.analysis,
+    } : null);
+    setAnalysis(resumeProject.analysis || null);
+    setAnalysisConfirmed(Boolean(resumeProject.analysis));
     setQuotedAmount(resumeProject.amount);
-    setStep(3);
+    setStep(resumeProject.checkoutState === 'awaiting_payment' ? 3 : resumeProject.analysis ? 2 : 1);
     setError('');
   }, [resumeProject?.id, resumeProject?.quoteToken]);
   const plan = plans.find((p) => p.name === service) || plans[0],
@@ -1601,19 +1644,57 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
     setProgress(0);
     setBusy(true);
     try {
-      const saved = await uploadProjectFile(
+      const discipline = service === 'طراحی برق' ? 'electrical' : 'mechanical';
+      const started = await uploadProjectFile(
         me,
         file,
-        service === 'طراحی برق' ? 'electrical' : 'mechanical',
+        discipline,
         kind,
         setProgress,
       );
-      setUpload(saved);
-      setAnalysis(saved.analysis);
+      setUpload(started);
+      setAnalysis(started.analysis || null);
       setPrepared(null); setQuotedAmount(null);
       sessionStorage.removeItem('engi-handoff');
-      draftProjectId.current = '';
+      if (!draftProjectId.current)
+        draftProjectId.current = `PRJ-${crypto.randomUUID()}`;
       setAnalysisConfirmed(false);
+      let persistedJobId = '';
+      const persistPending = async (current: ProjectUpload) => {
+        setUpload(current);
+        if (!current.analysisJobId || current.analysisJobId === persistedJobId) return;
+        persistedJobId = current.analysisJobId;
+        const pendingDraft: Project = {
+          id: draftProjectId.current,
+          owner: me,
+          title: title.trim(),
+          service,
+          area: 0,
+          amount: 0,
+          status: 'در حال پردازش',
+          progress: 0,
+          date: 'امروز',
+          checkoutState: 'draft',
+          resumeAction: 'complete',
+          fileKey: current.key,
+          fileName: current.name,
+          analysisJobId: current.analysisJobId,
+          answers: { kind },
+        };
+        update((state) => ({
+          ...state,
+          projects: [...state.projects.filter((item) => item.id !== pendingDraft.id), pendingDraft],
+        }));
+        await customerRequest('import', { projects: [pendingDraft] });
+      };
+      await persistPending(started);
+      const saved = started.analysis
+        ? started
+        : await analyzeStoredProjectFile(me, started, discipline, kind, persistPending);
+      setUpload(saved);
+      setAnalysis(saved.analysis || null);
+      if (!saved.analysis || !/^[0-9a-f]{32}$/.test(saved.analysisJobId || ''))
+        throw new Error(saved.analysisError || 'تحلیل فایل کامل نشد؛ دوباره ادامه تحلیل را بزنید.');
       await new Promise((r) => setTimeout(r, 350));
       setStep(2);
     } catch (reason) {
@@ -1626,6 +1707,36 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
       setBusy(false);
     }
   }
+  const resumedAnalysisJob = useRef('');
+  useEffect(() => {
+    const jobId = upload?.analysisJobId || '';
+    if (!upload?.key || !jobId || analysis || busy || resumedAnalysisJob.current === jobId) return;
+    resumedAnalysisJob.current = jobId;
+    setBusy(true);
+    setError('');
+    const discipline = service === 'طراحی برق' ? 'electrical' : 'mechanical';
+    void analyzeStoredProjectFile(me, upload, discipline, kind, setUpload)
+      .then(async (saved) => {
+        if (!saved.analysis) throw new Error('تحلیل ذخیره‌شده هنوز آماده نیست.');
+        setUpload(saved);
+        setAnalysis(saved.analysis);
+        const draft = data.projects.find((item) => item.id === draftProjectId.current);
+        if (draft) {
+          const readyDraft = { ...draft, analysisJobId: saved.analysisJobId, analysis: saved.analysis };
+          update((state) => ({
+            ...state,
+            projects: [...state.projects.filter((item) => item.id !== readyDraft.id), readyDraft],
+          }));
+          await customerRequest('import', { projects: [readyDraft] });
+        }
+        setStep(2);
+      })
+      .catch((reason) => {
+        resumedAnalysisJob.current = '';
+        setError(reason instanceof Error ? reason.message : 'ادامه تحلیل فایل انجام نشد.');
+      })
+      .finally(() => setBusy(false));
+  }, [upload?.key, upload?.analysisJobId, analysis, busy, service, kind]);
   function continueToQuestions() {
     if (!automaticAreaAllowed && !hasValidManualArea)
       return setError(
@@ -1701,7 +1812,9 @@ function NewProject({ data, update, resumeProject }: { data: Store; update: Stor
       date: 'امروز',
       fileKey: upload?.key,
       fileName: upload?.name,
+      analysisJobId: upload?.analysisJobId,
       note,
+      analysis: analysis || undefined,
       answers: projectAnswers,
     };
     setBusy(true);
@@ -4477,9 +4590,13 @@ export function Portal({ mode }: { mode?: 'admin' | 'panel' } = {}) {
   if (!admin) {
     if (page === 'projects' && id === 'new')
       return <NewProject data={data} update={update} />;
-    if (page === 'projects' && id && action === 'payment') {
+    if (page === 'projects' && id && ['complete', 'payment'].includes(action || '')) {
       const resumeProject = data.projects.find((project) => project.id === id);
-      if (resumeProject?.checkoutState === 'awaiting_payment' || resumeProject?.paymentRequired)
+      if (
+        resumeProject?.checkoutState === 'draft' ||
+        resumeProject?.checkoutState === 'awaiting_payment' ||
+        resumeProject?.paymentRequired
+      )
         return <NewProject data={data} update={update} resumeProject={resumeProject} />;
     }
     if (page === 'projects')

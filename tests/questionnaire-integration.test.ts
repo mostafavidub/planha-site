@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 test('project upload obtains the file-specific questionnaire from the central engine', () => {
-  const route = readFileSync('app/api/project-file/route.ts', 'utf8');
-  assert.match(route, /api\/questionnaire\/analyze/);
+  const route = readFileSync('lib/project-file-handler.ts', 'utf8');
+  assert.match(route, /internal\/panel\/questionnaire\/start/);
+  assert.match(route, /internal\/panel\/questionnaire\/\$\{analysisJobId\}/);
+  assert.match(route, /analysisJobId: outcome\.jobId/);
   assert.match(route, /discipline=/);
   assert.match(route, /occupancy=/);
   assert.match(route, /questionnaireIdentity/);

@@ -63,21 +63,22 @@ export async function POST(request: Request) {
     const session = await sessionResponse.json() as { userId: string };
     if (session.userId !== userId) return Response.json({ error: 'مالک فایل معتبر نیست.' }, { status: 403 });
     const fileKey = stringValue(body.fileKey);
-    const fileName = stringValue(body.fileName, 'project.dxf').slice(0, 240);
+    const analysisJobId = stringValue(body.analysisJobId);
     const discipline = body.discipline === 'electrical' ? 'electrical' : 'mechanical';
     if (!projectId || !userId || !fileKey.startsWith(`projects/${userId}/`))
       return Response.json({ error: 'اطلاعات فایل پروژه معتبر نیست.' }, { status: 400 });
-    const object = await (env.FILES as R2Bucket).get(fileKey);
-    if (!object) return Response.json({ error: 'فایل پروژه پیدا نشد.' }, { status: 404 });
-    const bytes = await object.arrayBuffer();
+    if (!/^[0-9a-f]{32}$/.test(analysisJobId))
+      return Response.json({
+        error: 'تحلیل این فایل با قرارداد فعلی ثبت نشده است؛ فایل را دوباره تحلیل کنید.',
+      }, { status: 409 });
     const form = new FormData();
     form.append('external_project_id', projectId);
     form.append('external_user_id', userId);
     form.append('name', stringValue(body.title, projectId));
     form.append('discipline', discipline);
     form.append('occupancy', stringValue(body.occupancy));
+    form.append('analysis_job_id', analysisJobId);
     form.append('answers_json', JSON.stringify(body.answers || {}));
-    form.append('file', new File([bytes], fileName, { type: object.httpMetadata?.contentType || 'application/octet-stream' }));
     const response = await fetch(`${ENGINE}/internal/panel/projects`, {
       method: 'POST',
       headers: { accept: 'application/json', 'x-panel-token': bridgeToken(), 'x-customer-session': customerSession(request) },

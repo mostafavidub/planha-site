@@ -5,7 +5,8 @@ import test from 'node:test';
 const ui = readFileSync(new URL('../components/admin.tsx', import.meta.url), 'utf8');
 const bridge = readFileSync(new URL('../app/api/design-project/route.ts', import.meta.url), 'utf8');
 const output = readFileSync(new URL('../app/api/design-project/output/route.ts', import.meta.url), 'utf8');
-const projectFile = readFileSync(new URL('../app/api/project-file/route.ts', import.meta.url), 'utf8');
+const projectFile = readFileSync(new URL('../lib/project-file-handler.ts', import.meta.url), 'utf8');
+const projectFileRoute = readFileSync(new URL('../app/api/project-file/route.ts', import.meta.url), 'utf8');
 const questionnaire = readFileSync(new URL('../app/api/questionnaire/route.ts', import.meta.url), 'utf8');
 
 test('payment delegates the debit and queue to authoritative server checkout', () => {
@@ -36,11 +37,11 @@ test('unpaid quoted projects resume the saved payment step instead of restarting
   assert.match(ui, /engineStatus === 'awaiting_payment' \|\| project\.paymentRequired/);
   assert.match(ui, /\? 'در انتظار پرداخت'/);
   assert.match(ui, /navigatePath\(`\/panel\/projects\/\$\{project\.id\}\/payment`\)/);
-  assert.match(ui, /resumeProject\.checkoutState !== 'awaiting_payment'/);
+  assert.match(ui, /\['draft', 'awaiting_payment'\]\.includes\(resumeProject\.checkoutState/);
   assert.match(ui, /setPrepared\(resumeProject\)/);
   assert.match(ui, /setQuotedAmount\(resumeProject\.amount\)/);
   assert.match(ui, /setStep\(3\)/);
-  assert.match(ui, /action === 'payment'/);
+  assert.match(ui, /\['complete', 'payment'\]\.includes\(action/);
 });
 
 test('progress is polled from persisted engine milestones instead of simulated', () => {
@@ -88,13 +89,23 @@ test('download is available only after the engine marks output ready', () => {
 
 test('server bridge keeps service credentials and stored files off the browser', () => {
   assert.match(bridge, /PANEL_BRIDGE_TOKEN/);
-  assert.match(bridge, /env\.FILES/);
+  assert.doesNotMatch(bridge, /env\.FILES/);
+  assert.match(projectFileRoute, /env\.FILES/);
   assert.match(bridge, /x-panel-token/);
   assert.doesNotMatch(ui, /PANEL_BRIDGE_TOKEN|x-panel-token/);
 });
 
+test('finalization transports only the canonical ready job identity', () => {
+  assert.match(ui, /analysisJobId: project\.analysisJobId/);
+  assert.match(ui, /\^\[0-9a-f\]\{32\}\$/);
+  assert.match(bridge, /form\.append\('analysis_job_id', analysisJobId\)/);
+  assert.doesNotMatch(bridge, /form\.append\('file'/);
+  assert.doesNotMatch(bridge, /form\.append\('analysis'/);
+  assert.match(bridge, /فایل را دوباره تحلیل کنید/);
+});
+
 test('all design routes share one environment-specific engine origin', () => {
-  for (const route of [bridge, output, projectFile, questionnaire]) {
+  for (const route of [bridge, output, projectFileRoute, questionnaire]) {
     assert.match(route, /(?:import|,).*ENGINE/);
     assert.doesNotMatch(route, /web-app-production-3d3b\.up\.railway\.app/);
   }
